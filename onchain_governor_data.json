@@ -1,0 +1,239 @@
+{
+  "generated_at": "2026-03-08T08:52:26.031550+00:00",
+  "source": "Etherscan API (on-chain events)",
+  "note": "Proposal counts capped at 1000 per contract by Etherscan free tier getLogs",
+  "contracts": [
+    {
+      "dao": "Compound",
+      "contract_address": "0xc0dA01a04C3f3E0be433606045bB7017A7323E38",
+      "governor_type": "GovernorAlpha",
+      "chain": "mainnet",
+      "deploy_date": "2020-03-04",
+      "deploy_year": 2020,
+      "deploy_block": 9601459,
+      "first_proposal_date": "2020-04-27",
+      "first_proposal_year": 2020,
+      "first_proposal_block": 9951904,
+      "proposal_count_onchain": 42
+    },
+    {
+      "dao": "Uniswap",
+      "contract_address": "0x5e4be8Bc9637f0EAA1A755019e06A68ce081D58F",
+      "governor_type": "GovernorAlpha",
+      "chain": "mainnet",
+      "deploy_date": "2020-09-14",
+      "deploy_year": 2020,
+      "deploy_block": 10861678,
+      "first_proposal_date": "2020-10-12",
+      "first_proposal_year": 2020,
+      "first_proposal_block": 11042287,
+      "proposal_count_onchain": 5
+    },
+    {
+      "dao": "Compound",
+      "contract_address": "0xc0Da02939E1441F497fd74F78cE7Decb17B66529",
+      "governor_type": "GovernorBravo",
+      "chain": "mainnet",
+      "deploy_date": "2021-03-09",
+      "deploy_year": 2021,
+      "deploy_block": 12006099,
+      "first_proposal_date": "2021-04-14",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 12235671,
+      "proposal_count_onchain": 351
+    },
+    {
+      "dao": "Uniswap",
+      "contract_address": "0x408ED6354d4973f66138C91495F2f2FCbd8724C3",
+      "governor_type": "GovernorBravo",
+      "chain": "mainnet",
+      "deploy_date": "2021-08-20",
+      "deploy_year": 2021,
+      "deploy_block": 13059157,
+      "first_proposal_date": "2021-08-30",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 13129516,
+      "proposal_count_onchain": 95
+    },
+    {
+      "dao": "Gitcoin",
+      "contract_address": "0xDbD27635A534A3d3169Ef0498beB56Fb9c937489",
+      "governor_type": "GovernorBravo",
+      "chain": "mainnet",
+      "deploy_date": "2021-05-24",
+      "deploy_year": 2021,
+      "deploy_block": 12497481,
+      "first_proposal_date": "2021-08-13",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 13018595,
+      "proposal_count_onchain": 66
+    },
+    {
+      "dao": "FEI Protocol",
+      "contract_address": "0x0BEF27FEB58e857046d630B2c03dFb7bae567494",
+      "governor_type": "GovernorBravo",
+      "chain": "mainnet",
+      "deploy_date": "2021-10-04",
+      "deploy_year": 2021,
+      "deploy_block": 13349454,
+      "first_proposal_date": "2021-10-07",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 13370450,
+      "proposal_count_onchain": 64
+    },
+    {
+      "dao": "Indexed Finance",
+      "contract_address": "0x95129751769f99CC39824a0793eF4933DD8Bb74B",
+      "governor_type": "GovernorBravo",
+      "chain": "mainnet",
+      "deploy_date": "2020-12-15",
+      "deploy_year": 2020,
+      "deploy_block": 11457782,
+      "first_proposal_date": "2020-12-25",
+      "first_proposal_year": 2020,
+      "first_proposal_block": 11524879,
+      "proposal_count_onchain": 29
+    },
+    {
+      "dao": "ENS",
+      "contract_address": "0x323A76393544d5ecca80cd6ef2A560C6a395b7E3",
+      "governor_type": "OZGovernor",
+      "chain": "mainnet",
+      "deploy_date": "2021-11-01",
+      "deploy_year": 2021,
+      "deploy_block": 13533772,
+      "first_proposal_date": "2022-01-05",
+      "first_proposal_year": 2022,
+      "first_proposal_block": 13942537,
+      "proposal_count_onchain": 64
+    },
+    {
+      "dao": "Nouns DAO",
+      "contract_address": "0x6f3E6272A167e8AcCb32072d08E0957F9c79223d",
+      "governor_type": "NounsGovernor",
+      "chain": "mainnet",
+      "deploy_date": "2021-08-08",
+      "deploy_year": 2021,
+      "deploy_block": 12985453,
+      "first_proposal_date": "2021-08-19",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 13057048,
+      "proposal_count_onchain": 947
+    },
+    {
+      "dao": "PoolTogether",
+      "contract_address": "0xB3a87172F555ae2a2AB79Be60B336D2F7D0187f0",
+      "governor_type": "OZGovernor",
+      "chain": "mainnet",
+      "deploy_date": "2021-02-16",
+      "deploy_year": 2021,
+      "deploy_block": 11870114,
+      "first_proposal_date": "2021-03-03",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 11962774,
+      "proposal_count_onchain": 79
+    },
+    {
+      "dao": "Hop Protocol",
+      "contract_address": "0xed8Bdb5895B8B7f9Fdb3C087628FD8410E853D48",
+      "governor_type": "OZGovernor",
+      "chain": "mainnet",
+      "deploy_date": "2022-06-08",
+      "deploy_year": 2022,
+      "deploy_block": 14923681,
+      "first_proposal_date": "2022-10-03",
+      "first_proposal_year": 2022,
+      "first_proposal_block": 15670864,
+      "proposal_count_onchain": 17
+    },
+    {
+      "dao": "Rari Capital",
+      "contract_address": "0x637deEED4e4deb1D222650bD4B64192abf002c00",
+      "governor_type": "OZGovernor",
+      "chain": "mainnet",
+      "deploy_date": "2021-12-14",
+      "deploy_year": 2021,
+      "deploy_block": 13801056,
+      "first_proposal_date": "2022-03-23",
+      "first_proposal_year": 2022,
+      "first_proposal_block": 14439675,
+      "proposal_count_onchain": 3
+    },
+    {
+      "dao": "Tribe DAO",
+      "contract_address": "0xE087F94c3081e1832dC7a22B48c6f2b5fAaE579B",
+      "governor_type": "OZGovernor",
+      "chain": "mainnet",
+      "deploy_date": "2021-03-28",
+      "deploy_year": 2021,
+      "deploy_block": 12125745,
+      "first_proposal_date": "2021-04-26",
+      "first_proposal_year": 2021,
+      "first_proposal_block": 12317988,
+      "proposal_count_onchain": 23
+    },
+    {
+      "dao": "Element Finance",
+      "contract_address": "0x8F1B82c2C49b6cFeFCd2b5C4Ece5e7E2b1C7e3Fe",
+      "governor_type": "OZGovernor",
+      "chain": "mainnet",
+      "deploy_date": null,
+      "deploy_year": null,
+      "deploy_block": null,
+      "first_proposal_date": null,
+      "first_proposal_year": null,
+      "first_proposal_block": null,
+      "proposal_count_onchain": 0
+    }
+  ],
+  "yearly_stats": [
+    {
+      "year": 2020,
+      "unique_daos_first_proposal": 3,
+      "governor_contracts_deployed": 3,
+      "total_proposals_onchain": 76,
+      "daos": [
+        "Compound",
+        "Indexed Finance",
+        "Uniswap"
+      ]
+    },
+    {
+      "year": 2021,
+      "unique_daos_first_proposal": 5,
+      "governor_contracts_deployed": 9,
+      "total_proposals_onchain": 1625,
+      "daos": [
+        "FEI Protocol",
+        "Gitcoin",
+        "Nouns DAO",
+        "PoolTogether",
+        "Tribe DAO"
+      ]
+    },
+    {
+      "year": 2022,
+      "unique_daos_first_proposal": 3,
+      "governor_contracts_deployed": 1,
+      "total_proposals_onchain": 84,
+      "daos": [
+        "ENS",
+        "Hop Protocol",
+        "Rari Capital"
+      ]
+    }
+  ],
+  "dao_first_proposal_year": {
+    "Compound": 2020,
+    "Uniswap": 2020,
+    "Gitcoin": 2021,
+    "FEI Protocol": 2021,
+    "Indexed Finance": 2020,
+    "ENS": 2022,
+    "Nouns DAO": 2021,
+    "PoolTogether": 2021,
+    "Hop Protocol": 2022,
+    "Rari Capital": 2022,
+    "Tribe DAO": 2021
+  }
+}
