@@ -1,27 +1,43 @@
 """
 Arbitrum DVP Drop Transaction Analyzer
 
-For each transaction in the input CSV (tx_hash, dvp_delta_arb, delegate_address),
-fetches on-chain data from Arbitrum One via Etherscan API to determine:
+For each transaction hash in the input CSV, fetches on-chain data from
+Arbitrum One via the Etherscan API to determine:
+  - Which delegate lost voting power (from DelegateVotesChanged log)
+  - How much DVP was lost (from the same log)
   - Who initiated the transaction
   - Where ARB tokens were transferred (if any)
-  - A tag explaining the DVP drop (SOLD_CEX, SOLD_DEX, UNDELEGATE_ONLY, etc.)
+  - A tag explaining the DVP drop
 
 Usage:
     python dvp_transaction_analyzer.py <input_csv> [output_csv]
 
-    input_csv  : CSV with columns tx_hash, dvp_delta_arb, delegate_address
-                 (column names matched case-insensitively; extra columns are
-                  passed through to the output)
+    input_csv  : CSV where the only required column is tx_hash.
+                 Any extra columns (e.g. dvp_delta_arb, delegate_address
+                 from your original pull) are passed through to the output.
     output_csv : optional; defaults to dvp_analysis_results.csv
 
-Column name aliases accepted:
-    tx_hash        : transaction_hash, hash, txhash, tx
-    dvp_delta_arb  : dvp_delta, delta_arb, delta, dvp_change, change_arb
-    delegate_address: delegate, delegate_addr, delegatee
+Column name aliases accepted for tx_hash:
+    transaction_hash, hash, txhash, tx
 
-Output columns (appended to the input columns):
-    block_number, timestamp, initiator,
+Tags produced:
+    SOLD_CEX          ARB sent to a known centralised exchange
+    SOLD_DEX          ARB swapped on a DEX (Uniswap, Camelot, Balancer …)
+    SOLD_COWSWAP      ARB routed through CowSwap GPv2Settlement
+    BRIDGE_OUT        ARB sent to a bridge (Hop, Stargate, Across …)
+    VESTING_RELEASE   ARB transferred from a vesting contract
+    UNDELEGATE_ONLY   User removed delegation without moving tokens
+    REDELEGATE        Delegation moved to a different address
+    MULTISIG_TRANSFER Gnosis Safe / multisig wallet involved
+    DAO_INTERNAL      Arbitrum Foundation / DAO treasury movement
+    WALLET_TRANSFER   Moved to an unrecognised wallet
+    TX_FAILED         Transaction reverted
+    FETCH_ERROR       Could not retrieve the receipt
+    UNKNOWN           No ARB transfers or delegation events found
+
+Output columns (appended to your input columns):
+    block_number, initiator,
+    delegate_address_onchain, dvp_delta_arb_onchain,
     arb_from, arb_to, arb_amount_arb,
     recipient_label, recipient_category,
     tag, confidence, notes
@@ -49,8 +65,8 @@ DELEGATE_CHANGED_TOPIC   = "0x3134e8a2e6d97e929a7e54011ea5485d7d196dd5f0ba4d4ef9
 # keccak256("DelegateVotesChanged(address,uint256,uint256)")
 DELEGATE_VOTES_CHG_TOPIC = "0x8e40b9b56e7a96c2f6d7e36bc6e7af2b7ff3a4e7bef5f6e24c3d7c06ad4c3e6"
 
-RATE_LIMIT_DELAY  = 0.25   # seconds between Etherscan calls
-CHECKPOINT_EVERY  = 10     # flush output every N transactions
+RATE_LIMIT_DELAY   = 0.25   # seconds between Etherscan calls
+CHECKPOINT_EVERY   = 10     # flush output every N transactions
 ADDRESS_CACHE_FILE = "address_label_cache.json"
 
 # ── Known Arbitrum One address labels ─────────────────────────────────────────
@@ -242,12 +258,9 @@ CONTRACT_NAME_PATTERNS: list[tuple[str, str, str]] = [
 ]
 
 # ── Column aliases ─────────────────────────────────────────────────────────────
+# Only tx_hash is required; the rest are optional pass-through columns.
 
-HASH_ALIASES     = {"tx_hash", "transaction_hash", "hash", "txhash", "tx"}
-DELTA_ALIASES    = {"dvp_delta_arb", "dvp_delta", "delta_arb", "delta", "dvp_change",
-                    "change_arb", "arb_delta", "amount_arb", "amount"}
-DELEGATE_ALIASES = {"delegate_address", "delegate", "delegate_addr", "delegatee",
-                    "delegate_who_lost"}
+HASH_ALIASES = {"tx_hash", "transaction_hash", "hash", "txhash", "tx"}
 
 # ── Etherscan helpers ─────────────────────────────────────────────────────────
 
@@ -363,6 +376,42 @@ def parse_delegate_changed(logs: list) -> list[dict]:
             })
     return events
 
+
+def parse_delegate_votes_changed(logs: list) -> list[dict]:
+    """
+    Extract DelegateVotesChanged events from ARB token logs.
+    Returns [{delegate, previous_votes_wei, new_votes_wei, delta_wei}].
+
+    Identified structurally (no keccak256 needed):
+      - emitted by the ARB token contract
+      - exactly 2 topics  (topics[0]=sig, topics[1]=delegate address, indexed)
+      - data = 64 bytes   (previousVotes uint256 + newVotes uint256, non-indexed)
+    This combination is unique to DelegateVotesChanged on the ARB token.
+    """
+    events = []
+    for log in logs:
+        if log.get("address", "").lower() != ARB_TOKEN:
+            continue
+        topics = log.get("topics", [])
+        data   = log.get("data", "")
+        # 2 topics + 64-byte data (128 hex chars + "0x" prefix = 130 chars)
+        if len(topics) != 2 or len(data) != 130:
+            continue
+        delegate = decode_address(topics[1])
+        data_hex = data[2:]
+        try:
+            prev_votes = int(data_hex[:64], 16)
+            new_votes  = int(data_hex[64:], 16)
+        except ValueError:
+            continue
+        events.append({
+            "delegate":          delegate,
+            "previous_votes_wei": prev_votes,
+            "new_votes_wei":      new_votes,
+            "delta_wei":          new_votes - prev_votes,  # negative = DVP loss
+        })
+    return events
+
 # ── Address labelling ─────────────────────────────────────────────────────────
 
 def lookup_label(
@@ -424,8 +473,7 @@ CATEGORY_TO_TAG = {
 def tag_transaction(
     receipt: dict,
     transfers: list[dict],
-    delegate_events: list[dict],
-    delegate_address: str,
+    delegate_changed_events: list[dict],
     name_cache: dict,
 ) -> dict:
     """
@@ -491,9 +539,8 @@ def tag_transaction(
         }
 
     # ── No ARB transfers: check delegation events ───────────────────────
-    if delegate_events:
-        delegate_l = delegate_address.lower()
-        for ev in delegate_events:
+    if delegate_changed_events:
+        for ev in delegate_changed_events:
             to_d = ev["to_delegate"].lower()
             delegator = ev["delegator"].lower()
             zero = "0x" + "0" * 40
@@ -534,37 +581,28 @@ def tag_transaction(
 # ── CSV helpers ───────────────────────────────────────────────────────────────
 
 EXTRA_OUTPUT_COLS = [
-    "block_number", "timestamp", "initiator",
+    "block_number", "initiator",
+    "delegate_address_onchain", "dvp_delta_arb_onchain",
     "arb_from", "arb_to", "arb_amount_arb",
     "recipient_label", "recipient_category",
     "tag", "confidence", "notes",
 ]
 
 
-def detect_columns(header: list[str]) -> tuple[str, str, str]:
+def detect_hash_column(header: list[str]) -> str:
     """
-    Detect which header columns correspond to tx_hash, dvp_delta_arb,
-    delegate_address.  Returns a tuple of the actual column names found.
-    Raises ValueError if required columns can't be found.
+    Find which column in header holds the transaction hash.
+    Raises ValueError if none found.
     """
     header_lower = {col.lower(): col for col in header}
-    found = {}
-    for canonical, aliases in [
-        ("tx_hash",          HASH_ALIASES),
-        ("dvp_delta_arb",    DELTA_ALIASES),
-        ("delegate_address", DELEGATE_ALIASES),
-    ]:
-        for alias in aliases:
-            if alias in header_lower:
-                found[canonical] = header_lower[alias]
-                break
-        if canonical not in found:
-            raise ValueError(
-                f"Could not find column for '{canonical}'. "
-                f"Tried: {aliases}. "
-                f"Available columns: {header}"
-            )
-    return found["tx_hash"], found["dvp_delta_arb"], found["delegate_address"]
+    for alias in HASH_ALIASES:
+        if alias in header_lower:
+            return header_lower[alias]
+    raise ValueError(
+        f"Could not find a tx_hash column. "
+        f"Tried: {HASH_ALIASES}. "
+        f"Available columns: {header}"
+    )
 
 
 def load_checkpoint(output_path: Path) -> set[str]:
@@ -614,21 +652,21 @@ def main() -> None:
     # ── Read input ──────────────────────────────────────────────────────
     with open(input_path, newline="") as f:
         reader = csv.DictReader(f)
-        rows = list(reader)
-        header = reader.fieldnames or []
+        rows   = list(reader)
+        header = list(reader.fieldnames or [])
 
-    col_hash, col_delta, col_delegate = detect_columns(list(header))
+    col_hash = detect_hash_column(header)
 
-    # Build output header (passthrough all input cols + new analysis cols,
-    # avoiding duplicate column names)
-    new_cols = [c for c in EXTRA_OUTPUT_COLS if c not in header]
-    out_fieldnames = list(header) + new_cols
+    # Build output header: passthrough all input cols + new analysis cols,
+    # avoiding duplicates if the user already has some of these column names.
+    new_cols       = [c for c in EXTRA_OUTPUT_COLS if c not in header]
+    out_fieldnames = header + new_cols
 
     # ── Open output (append if checkpoint exists) ───────────────────────
-    file_mode  = "a" if done_hashes else "w"
-    write_hdr  = not done_hashes
-    out_file   = open(output_path, file_mode, newline="")
-    writer     = csv.DictWriter(out_file, fieldnames=out_fieldnames, extrasaction="ignore")
+    file_mode = "a" if done_hashes else "w"
+    write_hdr = not done_hashes
+    out_file  = open(output_path, file_mode, newline="")
+    writer    = csv.DictWriter(out_file, fieldnames=out_fieldnames, extrasaction="ignore")
     if write_hdr:
         writer.writeheader()
 
@@ -645,10 +683,7 @@ def main() -> None:
                 skipped += 1
                 continue
 
-            delegate_address = row.get(col_delegate, "").strip()
-            dvp_delta        = row.get(col_delta, "").strip()
-
-            print(f"[{idx}/{total}] {tx_hash[:18]}…  delegate={delegate_address[:12]}…", end="  ")
+            print(f"[{idx}/{total}] {tx_hash[:20]}…", end="  ")
 
             # ── Fetch receipt ───────────────────────────────────────────
             time.sleep(RATE_LIMIT_DELAY)
@@ -665,38 +700,63 @@ def main() -> None:
                 errors += 1
                 continue
 
-            # ── Parse events ────────────────────────────────────────────
+            # ── Parse all relevant events from logs ─────────────────────
             logs             = receipt.get("logs", [])
             transfers        = parse_arb_transfers(logs)
-            delegate_events  = parse_delegate_changed(logs)
+            delegate_changed = parse_delegate_changed(logs)
+            votes_changed    = parse_delegate_votes_changed(logs)
 
-            block_hex   = receipt.get("blockNumber", "0x0")
-            block_int   = int(block_hex, 16) if block_hex else 0
-            # Etherscan receipt doesn't include timestamp; we skip live lookup
-            # to stay at 1 API call per tx. Timestamp can be enriched separately.
-            initiator   = receipt.get("from", "").lower()
+            block_hex = receipt.get("blockNumber", "0x0")
+            block_int = int(block_hex, 16) if block_hex else 0
+            initiator = receipt.get("from", "").lower()
+
+            # ── Extract on-chain delegate address and DVP delta ─────────
+            # Use the DelegateVotesChanged event(s) to get ground truth.
+            # If multiple delegates were affected (rare), take the one with
+            # the largest absolute change.
+            if votes_changed:
+                primary_vc = max(votes_changed, key=lambda e: abs(e["delta_wei"]))
+                delegate_onchain  = primary_vc["delegate"]
+                dvp_delta_onchain = f"{primary_vc['delta_wei'] / 1e18:.2f}"
+                if len(votes_changed) > 1:
+                    others = [e["delegate"] for e in votes_changed if e != primary_vc]
+                    # will be appended to notes below
+            else:
+                delegate_onchain  = ""
+                dvp_delta_onchain = ""
 
             # ── Determine tag ────────────────────────────────────────────
-            result = tag_transaction(
-                receipt, transfers, delegate_events,
-                delegate_address, name_cache,
-            )
+            result = tag_transaction(receipt, transfers, delegate_changed, name_cache)
 
-            print(f"tag={result['tag']:25s}  conf={result['confidence']}")
+            # Append multi-delegate note if needed
+            if votes_changed and len(votes_changed) > 1:
+                others_str = "; ".join(
+                    f"{e['delegate']} ({e['delta_wei']/1e18:.0f} ARB)"
+                    for e in votes_changed if e != primary_vc
+                )
+                extra_note = f"Other delegates affected: {others_str}"
+                result["notes"] = (result["notes"] + " | " + extra_note).lstrip(" | ")
+
+            print(
+                f"delegate={delegate_onchain[:12] if delegate_onchain else '?'}…  "
+                f"delta={dvp_delta_onchain or '?':>12} ARB  "
+                f"tag={result['tag']:25s}  conf={result['confidence']}"
+            )
 
             # ── Write output row ─────────────────────────────────────────
             out_row = dict(row)
-            out_row["block_number"]       = block_int
-            out_row["timestamp"]          = ""  # see note above
-            out_row["initiator"]          = initiator
-            out_row["arb_from"]           = result["arb_from"]
-            out_row["arb_to"]             = result["arb_to"]
-            out_row["arb_amount_arb"]     = result["arb_amount_arb"]
-            out_row["recipient_label"]    = result["recipient_label"]
-            out_row["recipient_category"] = result["recipient_category"]
-            out_row["tag"]                = result["tag"]
-            out_row["confidence"]         = result["confidence"]
-            out_row["notes"]              = result["notes"]
+            out_row["block_number"]            = block_int
+            out_row["initiator"]               = initiator
+            out_row["delegate_address_onchain"] = delegate_onchain
+            out_row["dvp_delta_arb_onchain"]   = dvp_delta_onchain
+            out_row["arb_from"]                = result["arb_from"]
+            out_row["arb_to"]                  = result["arb_to"]
+            out_row["arb_amount_arb"]          = result["arb_amount_arb"]
+            out_row["recipient_label"]         = result["recipient_label"]
+            out_row["recipient_category"]      = result["recipient_category"]
+            out_row["tag"]                     = result["tag"]
+            out_row["confidence"]              = result["confidence"]
+            out_row["notes"]                   = result["notes"]
             writer.writerow(out_row)
 
             # Periodic flush + cache save
