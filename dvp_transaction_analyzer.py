@@ -480,6 +480,7 @@ def tag_transaction(
     receipt: dict,
     transfers: list[dict],
     delegate_changed_events: list[dict],
+    votes_changed: list[dict],
     name_cache: dict,
 ) -> dict:
     """
@@ -533,6 +534,21 @@ def tag_transaction(
             if tag == "WALLET_TRANSFER" and any("vesting" in n.lower() for n in notes_parts):
                 tag = "VESTING_RELEASE"
 
+        # Override: token transfer caused excluded address to lose delegation to an active delegate
+        excluded_lost = any(
+            e["delegate"].lower() in EXCLUDED_DELEGATE_ADDRESSES and e["delta_wei"] < 0
+            for e in votes_changed
+        )
+        active_gained = any(
+            e["delegate"].lower() not in EXCLUDED_DELEGATE_ADDRESSES and e["delta_wei"] > 0
+            for e in votes_changed
+        )
+        if excluded_lost and active_gained:
+            tag = "REDELEGATE_FROM_EXCLUDED"
+            notes_parts.append(
+                "Token transfer caused excluded address to lose delegation to an active delegate"
+            )
+
         return {
             "tag":                tag,
             "confidence":         to_label["confidence"],
@@ -557,11 +573,18 @@ def tag_transaction(
                     f"Delegator {ev['delegator']} delegated to excluded address {ev['to_delegate']}"
                 )
             elif from_d in EXCLUDED_DELEGATE_ADDRESSES:
-                tag = "UNDELEGATE_FROM_EXCLUDED"
-                notes_parts.append(
-                    f"Delegator {ev['delegator']} moved delegation away from excluded address "
-                    f"{ev['from_delegate']} to {ev['to_delegate']}"
-                )
+                if to_d != zero and to_d != delegator:
+                    tag = "REDELEGATE_FROM_EXCLUDED"
+                    notes_parts.append(
+                        f"Delegator {ev['delegator']} moved delegation from excluded address "
+                        f"{ev['from_delegate']} to {ev['to_delegate']}"
+                    )
+                else:
+                    tag = "UNDELEGATE_FROM_EXCLUDED"
+                    notes_parts.append(
+                        f"Delegator {ev['delegator']} removed delegation from excluded address "
+                        f"{ev['from_delegate']}"
+                    )
             elif to_d == zero or to_d == delegator:
                 tag = "UNDELEGATE_ONLY"
                 notes_parts.append(
@@ -744,7 +767,7 @@ def main() -> None:
                 dvp_delta_onchain = ""
 
             # ── Determine tag ────────────────────────────────────────────
-            result = tag_transaction(receipt, transfers, delegate_changed, name_cache)
+            result = tag_transaction(receipt, transfers, delegate_changed, votes_changed, name_cache)
 
             # Append multi-delegate note if needed
             if votes_changed and len(votes_changed) > 1:
@@ -758,9 +781,18 @@ def main() -> None:
             lost_addr   = delegate_onchain or "?"
             gained_addr = None
             if delegate_changed and result["tag"] in (
-                "REDELEGATE", "DELEGATE_TO_EXCLUDED", "UNDELEGATE_FROM_EXCLUDED"
+                "REDELEGATE", "DELEGATE_TO_EXCLUDED", "REDELEGATE_FROM_EXCLUDED"
             ):
                 gained_addr = delegate_changed[0]["to_delegate"]
+            # For REDELEGATE_FROM_EXCLUDED via token transfer (no DelegateChanged event),
+            # derive gained address from votes_changed
+            if not gained_addr and result["tag"] == "REDELEGATE_FROM_EXCLUDED" and votes_changed:
+                gained_addr = next(
+                    (e["delegate"] for e in votes_changed
+                     if e["delegate"].lower() not in EXCLUDED_DELEGATE_ADDRESSES
+                     and e["delta_wei"] > 0),
+                    None,
+                )
             addr_part = f"lost={lost_addr}"
             if gained_addr:
                 addr_part += f"  →  gained={gained_addr}"
