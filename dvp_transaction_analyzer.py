@@ -216,6 +216,12 @@ KNOWN_ADDRESSES: dict[str, tuple[str, str]] = {
     "0x0e2dd55d3b87975cacc86e7ebfc9b53c8fc95555": ("Investor Vesting Wallet", "VESTING"),
 }
 
+# Addresses excluded from the DVP calculation per the Arbitrum DVP framework.
+# Delegations to/from these addresses receive dedicated tags.
+EXCLUDED_DELEGATE_ADDRESSES: set[str] = {
+    "0x00000000000000000000000000000000000a4b86",
+}
+
 # Keyword patterns for contract-name–based categorisation (fallback via API)
 CONTRACT_NAME_PATTERNS: list[tuple[str, str, str]] = [
     # (substring_lower, label_prefix, category)
@@ -541,10 +547,22 @@ def tag_transaction(
     # ── No ARB transfers: check delegation events ───────────────────────
     if delegate_changed_events:
         for ev in delegate_changed_events:
-            to_d = ev["to_delegate"].lower()
+            to_d      = ev["to_delegate"].lower()
+            from_d    = ev["from_delegate"].lower()
             delegator = ev["delegator"].lower()
             zero = "0x" + "0" * 40
-            if to_d == zero or to_d == delegator:
+            if to_d in EXCLUDED_DELEGATE_ADDRESSES:
+                tag = "DELEGATE_TO_EXCLUDED"
+                notes_parts.append(
+                    f"Delegator {ev['delegator']} delegated to excluded address {ev['to_delegate']}"
+                )
+            elif from_d in EXCLUDED_DELEGATE_ADDRESSES:
+                tag = "UNDELEGATE_FROM_EXCLUDED"
+                notes_parts.append(
+                    f"Delegator {ev['delegator']} moved delegation away from excluded address "
+                    f"{ev['from_delegate']} to {ev['to_delegate']}"
+                )
+            elif to_d == zero or to_d == delegator:
                 tag = "UNDELEGATE_ONLY"
                 notes_parts.append(
                     f"Delegator {ev['delegator']} removed delegation from {ev['from_delegate']}"
@@ -737,10 +755,19 @@ def main() -> None:
                 extra_note = f"Other delegates affected: {others_str}"
                 result["notes"] = (result["notes"] + " | " + extra_note).lstrip(" | ")
 
+            lost_addr   = delegate_onchain or "?"
+            gained_addr = None
+            if delegate_changed and result["tag"] in (
+                "REDELEGATE", "DELEGATE_TO_EXCLUDED", "UNDELEGATE_FROM_EXCLUDED"
+            ):
+                gained_addr = delegate_changed[0]["to_delegate"]
+            addr_part = f"lost={lost_addr}"
+            if gained_addr:
+                addr_part += f"  →  gained={gained_addr}"
             print(
-                f"delegate={delegate_onchain[:12] if delegate_onchain else '?'}…  "
-                f"delta={dvp_delta_onchain or '?':>12} ARB  "
-                f"tag={result['tag']:25s}  conf={result['confidence']}"
+                f"  {addr_part}  "
+                f"delta={dvp_delta_onchain or '?':>14} ARB  "
+                f"tag={result['tag']:28s}  conf={result['confidence']}"
             )
 
             # ── Write output row ─────────────────────────────────────────
