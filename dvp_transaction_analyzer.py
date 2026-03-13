@@ -623,11 +623,21 @@ def tag_transaction(
 
 EXTRA_OUTPUT_COLS = [
     "block_number", "initiator",
-    "delegate_address_onchain", "dvp_delta_arb_onchain",
+    "delegate_lost", "delegate_gained",
+    "dvp_delta_cumulative", "dvp_delta_absolute",
     "arb_from", "arb_to", "arb_amount_arb",
     "recipient_label", "recipient_category",
     "tag", "confidence", "notes",
 ]
+
+# Tags where active DVP increases (delegation enters the active pool)
+TAGS_DVP_INCREASE = frozenset({"REDELEGATE_FROM_EXCLUDED"})
+# Tags where active DVP is unchanged (moves within active pool, or was already excluded)
+TAGS_DVP_NEUTRAL = frozenset({
+    "REDELEGATE", "UNDELEGATE_FROM_EXCLUDED",
+    "TX_FAILED", "FETCH_ERROR", "UNKNOWN",
+})
+# All other tags → active DVP decreases
 
 
 def detect_hash_column(header: list[str]) -> str:
@@ -751,20 +761,21 @@ def main() -> None:
             block_int = int(block_hex, 16) if block_hex else 0
             initiator = receipt.get("from", "").lower()
 
-            # ── Extract on-chain delegate address and DVP delta ─────────
-            # Use the DelegateVotesChanged event(s) to get ground truth.
-            # If multiple delegates were affected (rare), take the one with
-            # the largest absolute change.
+            # ── Extract on-chain delegate addresses from votes_changed ───
+            # delegate_lost  = the delegate whose votes decreased most
+            # delegate_gained = the delegate whose votes increased most
+            # primary_vc kept for multi-delegate notes below
+            delegate_lost   = ""
+            delegate_gained = ""
+            primary_vc      = None
             if votes_changed:
+                losers  = [e for e in votes_changed if e["delta_wei"] < 0]
+                gainers = [e for e in votes_changed if e["delta_wei"] > 0]
+                if losers:
+                    delegate_lost   = min(losers,  key=lambda e: e["delta_wei"])["delegate"]
+                if gainers:
+                    delegate_gained = max(gainers, key=lambda e: e["delta_wei"])["delegate"]
                 primary_vc = max(votes_changed, key=lambda e: abs(e["delta_wei"]))
-                delegate_onchain  = primary_vc["delegate"]
-                dvp_delta_onchain = f"{primary_vc['delta_wei'] / 1e18:.2f}"
-                if len(votes_changed) > 1:
-                    others = [e["delegate"] for e in votes_changed if e != primary_vc]
-                    # will be appended to notes below
-            else:
-                delegate_onchain  = ""
-                dvp_delta_onchain = ""
 
             # ── Determine tag ────────────────────────────────────────────
             result = tag_transaction(receipt, transfers, delegate_changed, votes_changed, name_cache)
@@ -778,36 +789,39 @@ def main() -> None:
                 extra_note = f"Other delegates affected: {others_str}"
                 result["notes"] = (result["notes"] + " | " + extra_note).lstrip(" | ")
 
-            lost_addr   = delegate_onchain or "?"
-            gained_addr = None
-            if delegate_changed and result["tag"] in (
-                "REDELEGATE", "DELEGATE_TO_EXCLUDED", "REDELEGATE_FROM_EXCLUDED"
-            ):
-                gained_addr = delegate_changed[0]["to_delegate"]
-            # For REDELEGATE_FROM_EXCLUDED via token transfer (no DelegateChanged event),
-            # derive gained address from votes_changed
-            if not gained_addr and result["tag"] == "REDELEGATE_FROM_EXCLUDED" and votes_changed:
-                gained_addr = next(
-                    (e["delegate"] for e in votes_changed
-                     if e["delegate"].lower() not in EXCLUDED_DELEGATE_ADDRESSES
-                     and e["delta_wei"] > 0),
-                    None,
-                )
-            addr_part = f"lost={lost_addr}"
-            if gained_addr:
-                addr_part += f"  →  gained={gained_addr}"
+            # ── Compute per-row DVP delta metrics ────────────────────────
+            tag = result["tag"]
+            dvp_magnitude = 0.0
+            if votes_changed and tag not in TAGS_DVP_NEUTRAL:
+                dvp_magnitude = max(abs(e["delta_wei"]) for e in votes_changed) / 1e18
+
+            if tag in TAGS_DVP_NEUTRAL:
+                dvp_delta_cumulative = 0.0
+                dvp_delta_absolute   = 0.0
+            elif tag in TAGS_DVP_INCREASE:
+                dvp_delta_cumulative = +dvp_magnitude
+                dvp_delta_absolute   = dvp_magnitude
+            else:
+                dvp_delta_cumulative = -dvp_magnitude
+                dvp_delta_absolute   = dvp_magnitude
+
+            addr_part = f"lost={delegate_lost or '?'}"
+            if delegate_gained:
+                addr_part += f"  →  gained={delegate_gained}"
             print(
                 f"  {addr_part}  "
-                f"delta={dvp_delta_onchain or '?':>14} ARB  "
+                f"Δ={dvp_delta_cumulative:+.2f} ARB  "
                 f"tag={result['tag']:28s}  conf={result['confidence']}"
             )
 
             # ── Write output row ─────────────────────────────────────────
             out_row = dict(row)
-            out_row["block_number"]            = block_int
-            out_row["initiator"]               = initiator
-            out_row["delegate_address_onchain"] = delegate_onchain
-            out_row["dvp_delta_arb_onchain"]   = dvp_delta_onchain
+            out_row["block_number"]         = block_int
+            out_row["initiator"]            = initiator
+            out_row["delegate_lost"]        = delegate_lost
+            out_row["delegate_gained"]      = delegate_gained
+            out_row["dvp_delta_cumulative"] = f"{dvp_delta_cumulative:.2f}"
+            out_row["dvp_delta_absolute"]   = f"{dvp_delta_absolute:.2f}"
             out_row["arb_from"]                = result["arb_from"]
             out_row["arb_to"]                  = result["arb_to"]
             out_row["arb_amount_arb"]          = result["arb_amount_arb"]
