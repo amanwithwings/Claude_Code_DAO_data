@@ -37,7 +37,8 @@ Tags produced:
 
 Output columns (appended to your input columns):
     block_number, initiator,
-    delegate_address_onchain, dvp_delta_arb_onchain,
+    delegate_lost, delegate_gained,
+    dvp_delta_cumulative, dvp_delta_absolute,
     arb_from, arb_to, arb_amount_arb,
     recipient_label, recipient_category,
     tag, confidence, notes
